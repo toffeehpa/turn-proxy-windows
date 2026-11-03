@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MSI на всю машину: файлы в Program Files, чтобы служба от SYSTEM запускала только то, что пользователь не подменит. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="FreeTurn"
+           Manufacturer="FreeTurn"
+           Version="$(var.Version)"
+           UpgradeCode="{D8B18D87-CA35-410D-98BE-484F5BEBA4F3}"
+           Scope="perMachine"
+           Compressed="yes">
+    <!-- Beta-сборки одной x.y.z различает только release-please; MSI видит одну версию и должен её переставлять. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of FreeTurn is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="FreeTurn.ico" SourceFile="$(var.ResDir)\icons\freeturn.ico" />
+    <Property Id="ARPPRODUCTICON" Value="FreeTurn.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/toffeehpa/turn-proxy-windows" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <util:CloseApplication Id="CloseFreeTurn" Target="FreeTurn.exe" CloseMessage="yes" RebootPrompt="no" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="FreeTurn">
+        <Component Id="App">
+          <File Id="FreeTurnExe" Source="$(var.BinDir)\FreeTurn.exe" KeyPath="yes">
+            <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="FreeTurn"
+                      WorkingDirectory="INSTALLFOLDER" Icon="FreeTurn.ico" Advertise="yes" />
+          </File>
+        </Component>
+        <Component Id="Service">
+          <File Id="ServiceExe" Source="$(var.BinDir)\freeturn-service.exe" KeyPath="yes" />
+          <ServiceInstall Id="FreeTurnService" Name="FreeTurnService" DisplayName="FreeTurn Service"
+                          Description="Runs freeturn-core.exe for the FreeTurn tray app."
+                          Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Vital="yes" />
+          <ServiceControl Id="FreeTurnServiceControl" Name="FreeTurnService"
+                          Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        </Component>
+        <Component Id="Core">
+          <File Id="CoreExe" Source="$(var.BinDir)\freeturn-core.exe" KeyPath="yes" />
+        </Component>
+        <!-- Ядро грузит wintun.dll из своей папки, когда само поднимает туннель (-tun). -->
+        <Component Id="Wintun">
+          <File Id="WintunDll" Source="$(var.BinDir)\wintun.dll" KeyPath="yes" />
+        </Component>
+        <!-- Тексты без версии: GUID компонента генерируется, только если файл в нём один. -->
+        <Component Id="License">
+          <File Id="License" Source="$(var.BinDir)\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+        </Component>
+        <Component Id="CoreLicense">
+          <File Id="CoreLicense" Source="$(var.BinDir)\LICENSE-freeturn-core.txt" KeyPath="yes" />
+        </Component>
+        <Component Id="WintunLicense">
+          <File Id="WintunLicense" Source="$(var.BinDir)\LICENSE-wintun.txt" KeyPath="yes" />
+        </Component>
+        <Component Id="Notices">
+          <File Id="Notices" Source="$(var.BinDir)\THIRD_PARTY_NOTICES.md" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="FreeTurn" Level="1">
+      <ComponentRef Id="App" />
+      <ComponentRef Id="Service" />
+      <ComponentRef Id="Core" />
+      <ComponentRef Id="Wintun" />
+      <ComponentRef Id="License" />
+      <ComponentRef Id="CoreLicense" />
+      <ComponentRef Id="WintunLicense" />
+      <ComponentRef Id="Notices" />
+    </Feature>
+  </Package>
+</Wix>

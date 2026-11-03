@@ -1,0 +1,11 @@
+#pragma once
+
+namespace ft {
+
+inline constexpr const char* kAppVersion = "@FREETURN_VERSION@";
+inline constexpr int kAppVersionMajor = @PROJECT_VERSION_MAJOR@;
+inline constexpr int kAppVersionMinor = @PROJECT_VERSION_MINOR@;
+inline constexpr int kAppVersionPatch = @PROJECT_VERSION_PATCH@;
+inline constexpr const char* kCoreVersion = "@FREETURN_CORE_VERSION@";
+
+} // namespace ft

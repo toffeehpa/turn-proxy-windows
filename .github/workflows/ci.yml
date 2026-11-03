@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: Format
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: clang-format
+        shell: pwsh
+        run: |
+          clang-format --version
+          $files = git ls-files '*.cpp' '*.h'
+          clang-format --dry-run --Werror $files
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  build:
+    name: MSVC ${{ matrix.config }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DFREETURN_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --parallel
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure --timeout 120
+      - name: Package
+        if: matrix.config == 'Release'
+        shell: pwsh
+        run: |
+          $out = 'dist/bin'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item build/Release/FreeTurn.exe, build/Release/freeturn-service.exe, LICENSE, THIRD_PARTY_NOTICES.md $out
+          ./tools/fetch-core.ps1 -OutDir $out -Arch amd64
+          ./tools/fetch-wintun.ps1 -OutDir $out -Arch amd64
+      - name: Installer
+        if: matrix.config == 'Release'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+          $full = (Select-String -Path CMakeLists.txt -Pattern 'set\(FREETURN_VERSION "([^"]+)"\)').Matches[0].Groups[1].Value
+          $numeric = ($full -split '-')[0]
+          wix build installer/FreeTurn.wxs -arch x64 -ext WixToolset.Util.wixext `
+            -d Version=$numeric -d BinDir=dist/bin -d ResDir=res `
+            -o "dist/freeturn-$full-windows-amd64.msi"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Upload
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: freeturn-windows-amd64
+          path: dist/*.msi
+          retention-days: 7
