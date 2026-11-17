@@ -5,6 +5,7 @@
 #include <shellapi.h>
 #include <uxtheme.h>
 
+#include <algorithm>
 #include <array>
 #include <cwchar>
 #include <optional>
@@ -56,9 +57,10 @@ BOOL CALLBACK theme_child(HWND child, LPARAM) {
     const std::wstring_view name = cls;
     if (name == L"Button") {
         const auto type = GetWindowLongPtrW(child, GWL_STYLE) & BS_TYPEMASK;
-        // Темизированные чекбокс и рамка группы рисуют подпись чёрным и игнорируют WM_CTLCOLOR - берём
-        // классические.
-        if (type == BS_AUTOCHECKBOX || type == BS_CHECKBOX || type == BS_GROUPBOX) {
+        // Темизированные чекбокс, радиокнопка и рамка группы рисуют подпись чёрным и игнорируют WM_CTLCOLOR -
+        // берём классические.
+        if (type == BS_AUTOCHECKBOX || type == BS_CHECKBOX || type == BS_AUTORADIOBUTTON ||
+            type == BS_RADIOBUTTON || type == BS_GROUPBOX) {
             SetWindowTheme(child, L"", L"");
         } else {
             SetWindowTheme(child, L"DarkMode_Explorer", nullptr);
@@ -152,7 +154,6 @@ struct Choice {
 constexpr std::array kProviders = {Choice{"vk", S::ProviderVk}, Choice{"direct", S::ProviderDirect},
                                    Choice{"sfu", S::ProviderSfu}};
 constexpr std::array kModes = {Choice{"udp", S::ModeUdp}, Choice{"tcp", S::ModeTcp}};
-constexpr std::array kTransports = {Choice{"tcp"}, Choice{"udp"}};
 constexpr std::array kObf = {Choice{"none", S::ObfNone}, Choice{"rtpopus"}, Choice{"rtpopus2"},
                              Choice{"rtpopus3"}};
 
@@ -234,7 +235,79 @@ struct ProfileCtx {
     Theme theme;
     bool loading = false;
     bool obf = false;
+    bool advanced = false;
+    std::string provider;
+    // Своё число потоков (0 - дефолт провайдера): переживает переключение на SFU и обратно.
+    int custom_streams = 0;
 };
+
+// Всё, кроме ссылки, имени, звонков, транспорта и потоков, - под "Дополнительно", вместе с импортом из файла.
+constexpr std::array kAdvancedIds = {
+    IDC_FROM_FILE,  IDC_LBL_PROVIDER,  IDC_PROVIDER,  IDC_LBL_PEER,       IDC_PEER,
+    IDC_LBL_LISTEN, IDC_LISTEN,        IDC_LBL_MODE,  IDC_MODE,           IDC_LBL_OBF,
+    IDC_OBF,        IDC_LBL_OBF_KEY,   IDC_OBF_KEY,   IDC_LBL_OBF_TIMING, IDC_OBF_TIMING,
+    IDC_OBF_UNIT,   IDC_LBL_CLIENT_ID, IDC_CLIENT_ID, IDC_MANUAL_CAPTCHA, IDC_BOND};
+// Ряд кнопок в DLU: под потоками и под последним полем "Дополнительно".
+constexpr int kButtonsY = 133;
+constexpr int kButtonsAdvancedY = 329;
+// Предел ползунка - как в Android.
+constexpr int kMaxStreams = 128;
+
+void set_advanced(HWND dlg, ProfileCtx& ctx, bool on) {
+    ctx.advanced = on;
+    for (const int id : kAdvancedIds) {
+        ShowWindow(GetDlgItem(dlg, id), on ? SW_SHOW : SW_HIDE);
+    }
+    set_label(dlg, IDC_ADVANCED, on ? S::DlgAdvancedHide : S::DlgAdvanced);
+    const int y = on ? kButtonsAdvancedY : kButtonsY;
+    RECT row{0, y, 0, y + 14 + 7};
+    MapDialogRect(dlg, &row);
+    for (const int id : {IDC_ADVANCED, IDOK, IDCANCEL}) {
+        HWND h = GetDlgItem(dlg, id);
+        RECT r{};
+        GetWindowRect(h, &r);
+        MapWindowPoints(nullptr, dlg, reinterpret_cast<POINT*>(&r), 2);
+        SetWindowPos(h, nullptr, r.left, row.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    }
+    RECT client{};
+    RECT window{};
+    GetClientRect(dlg, &client);
+    GetWindowRect(dlg, &window);
+    const int frame = (window.bottom - window.top) - client.bottom;
+    SetWindowPos(dlg, nullptr, 0, 0, window.right - window.left, row.bottom + frame,
+                 SWP_NOMOVE | SWP_NOZORDER);
+}
+
+bool shown_without_advanced(ProfileIssue i) {
+    return i == ProfileIssue::MissingName || i == ProfileIssue::MissingLinks || i == ProfileIssue::BadLink ||
+           i == ProfileIssue::BadTransport || i == ProfileIssue::BadStreams;
+}
+
+// Потоки по умолчанию у провайдера - то, что ядро возьмёт при -n 0.
+int default_streams(std::string_view provider) {
+    Profile p;
+    p.provider = std::string(provider);
+    return p.effective_streams();
+}
+
+void enable_streams(HWND dlg, std::string_view provider) {
+    EnableWindow(GetDlgItem(dlg, IDC_STREAMS), provider != kProviderSfu);
+}
+
+int slider(HWND dlg, int id) {
+    return static_cast<int>(SendDlgItemMessageW(dlg, id, TBM_GETPOS, 0, 0));
+}
+
+// Подпись над ползунком повторяет его значение, как в Android: "Потоки: 12".
+void show_sliders(HWND dlg) {
+    SetDlgItemTextW(dlg, IDC_LBL_STREAMS,
+                    trf(S::DlgStreams, {std::to_wstring(slider(dlg, IDC_STREAMS))}).c_str());
+}
+
+void set_slider(HWND dlg, int id, int value) {
+    SendDlgItemMessageW(dlg, id, TBM_SETPOS, TRUE, value);
+    show_sliders(dlg);
+}
 
 void load_fields(HWND dlg, ProfileCtx& ctx) {
     ctx.loading = true;
@@ -253,8 +326,12 @@ void load_fields(HWND dlg, ProfileCtx& ctx) {
     set_utf8(dlg, IDC_LINKS, links);
     set_utf8(dlg, IDC_LISTEN, p.listen);
     fill_combo(dlg, IDC_MODE, kModes, p.mode);
-    fill_combo(dlg, IDC_TRANSPORT, kTransports, p.transport);
-    SetDlgItemInt(dlg, IDC_STREAMS, static_cast<UINT>(p.streams), FALSE);
+    check(dlg, IDC_TRANSPORT_UDP, p.transport == kTransportUdp);
+    check(dlg, IDC_TRANSPORT_TCP, p.transport != kTransportUdp);
+    set_slider(dlg, IDC_STREAMS, p.effective_streams());
+    enable_streams(dlg, p.provider);
+    ctx.provider = p.provider;
+    ctx.custom_streams = p.streams;
     fill_combo(dlg, IDC_OBF, kObf, p.obf_profile);
     set_utf8(dlg, IDC_OBF_KEY, p.secrets.obf_key);
     SetDlgItemInt(dlg, IDC_OBF_TIMING, static_cast<UINT>(p.obf_timing_ms), FALSE);
@@ -288,12 +365,19 @@ void read_fields(HWND dlg, Profile& p) {
     }
     p.listen = get_utf8(dlg, IDC_LISTEN);
     p.mode = combo_value(dlg, IDC_MODE, kModes);
-    p.transport = combo_value(dlg, IDC_TRANSPORT, kTransports);
-    BOOL ok = FALSE;
-    const UINT streams = GetDlgItemInt(dlg, IDC_STREAMS, &ok, FALSE);
-    p.streams = ok ? static_cast<int>(streams) : 0;
+    p.transport = std::string(checked(dlg, IDC_TRANSPORT_UDP) ? kTransportUdp : kTransportTcp);
+    // Не тронутое значение по умолчанию остаётся 0 - профиль и ссылка идут за дефолтом ядра.
+    // В SFU ползунок заблокирован на 1, своё число сохраняем для возврата к VK.
+    const bool was_default = p.streams == 0;
+    if (p.provider != kProviderSfu) {
+        p.streams = slider(dlg, IDC_STREAMS);
+    }
+    if (was_default && p.streams == default_streams(p.provider)) {
+        p.streams = 0;
+    }
     p.obf_profile = combo_value(dlg, IDC_OBF, kObf);
     p.secrets.obf_key = get_utf8(dlg, IDC_OBF_KEY);
+    BOOL ok = FALSE;
     const UINT timing = GetDlgItemInt(dlg, IDC_OBF_TIMING, &ok, FALSE);
     p.obf_timing_ms = ok && p.obf_profile != kObfNone ? static_cast<int>(timing) : 0;
     p.secrets.client_id = get_utf8(dlg, IDC_CLIENT_ID);
@@ -381,6 +465,9 @@ bool accept_profile(HWND dlg, ProfileCtx& ctx) {
         return false;
     }
     if (const auto issues = validate(p); !issues.empty()) {
+        if (!ctx.advanced && !std::ranges::all_of(issues, shown_without_advanced)) {
+            set_advanced(dlg, ctx, true);
+        }
         std::wstring list;
         for (const auto i : issues) {
             if (!list.empty()) {
@@ -412,7 +499,11 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         set_label(dlg, IDC_LBL_LISTEN, S::DlgListen);
         set_label(dlg, IDC_LBL_MODE, S::DlgMode);
         set_label(dlg, IDC_LBL_TRANSPORT, S::DlgTransport);
-        set_label(dlg, IDC_LBL_STREAMS, S::DlgStreams);
+        SetDlgItemTextW(dlg, IDC_TRANSPORT_UDP, L"UDP");
+        SetDlgItemTextW(dlg, IDC_TRANSPORT_TCP, L"TCP");
+        set_label(dlg, IDC_STREAMS_HINT, S::DlgStreamsHint);
+        SendDlgItemMessageW(dlg, IDC_STREAMS, TBM_SETRANGEMIN, FALSE, 1);
+        SendDlgItemMessageW(dlg, IDC_STREAMS, TBM_SETRANGEMAX, TRUE, kMaxStreams);
         set_label(dlg, IDC_LBL_OBF, S::DlgObf);
         set_label(dlg, IDC_LBL_OBF_KEY, S::DlgObfKey);
         set_label(dlg, IDC_LBL_OBF_TIMING, S::DlgObfTiming);
@@ -430,6 +521,7 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         SendMessageW(dlg, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
         load_fields(dlg, *ctx);
         apply_theme(dlg, ctx->theme);
+        set_advanced(dlg, *ctx, false);
         if (!ctx->opts.initial_link.empty()) {
             ctx->loading = true;
             set_utf8(dlg, IDC_LINK, ctx->opts.initial_link);
@@ -448,6 +540,9 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX:
         return ctx != nullptr ? theme_color(ctx->theme, msg, wp) : 0;
+    case WM_HSCROLL:
+        show_sliders(dlg);
+        return TRUE;
     case WM_COMMAND:
         if (ctx == nullptr) {
             return FALSE;
@@ -459,6 +554,22 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                 try_link(dlg, *ctx, false);
             }
             return TRUE;
+        case IDC_PROVIDER:
+            // Своё число потоков оставляем, дефолт меняется вместе с провайдером.
+            if (HIWORD(wp) == CBN_SELCHANGE && !ctx->loading) {
+                const std::string provider(combo_value(dlg, IDC_PROVIDER, kProviders));
+                if (ctx->provider != kProviderSfu) {
+                    const int shown = slider(dlg, IDC_STREAMS);
+                    ctx->custom_streams = shown != default_streams(ctx->provider) ? shown : 0;
+                }
+                const int next = provider != kProviderSfu && ctx->custom_streams > 0
+                                     ? ctx->custom_streams
+                                     : default_streams(provider);
+                set_slider(dlg, IDC_STREAMS, next);
+                enable_streams(dlg, provider);
+                ctx->provider = provider;
+            }
+            return TRUE;
         case IDC_OBF:
             // Пейсинг без обфускации ядро не принимает.
             if (HIWORD(wp) == CBN_SELCHANGE && !ctx->loading) {
@@ -468,6 +579,9 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                     ctx->obf = obf;
                 }
             }
+            return TRUE;
+        case IDC_ADVANCED:
+            set_advanced(dlg, *ctx, !ctx->advanced);
             return TRUE;
         case IDC_PASTE:
             if (auto text = clipboard_text(dlg); text && text->find("freeturn://") != std::string::npos) {
