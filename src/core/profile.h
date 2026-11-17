@@ -25,6 +25,8 @@ inline constexpr int kDefaultStreams = 12;
 inline constexpr int kDefaultDirectStreams = 1;
 inline constexpr int kDefaultStreamsPerCred = 12;
 inline constexpr int kBondMaxLanes = 256;
+// Пейсинг с обфускацией: 20 мс - ptime Opus.
+inline constexpr int kDefaultObfTimingMs = 20;
 
 struct KcpProfile {
     int no_delay = 1;

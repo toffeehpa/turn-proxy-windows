@@ -233,6 +233,7 @@ struct ProfileCtx {
     ProfileDialogOptions opts;
     Theme theme;
     bool loading = false;
+    bool obf = false;
 };
 
 void load_fields(HWND dlg, ProfileCtx& ctx) {
@@ -256,6 +257,8 @@ void load_fields(HWND dlg, ProfileCtx& ctx) {
     SetDlgItemInt(dlg, IDC_STREAMS, static_cast<UINT>(p.streams), FALSE);
     fill_combo(dlg, IDC_OBF, kObf, p.obf_profile);
     set_utf8(dlg, IDC_OBF_KEY, p.secrets.obf_key);
+    SetDlgItemInt(dlg, IDC_OBF_TIMING, static_cast<UINT>(p.obf_timing_ms), FALSE);
+    ctx.obf = p.obf_profile != kObfNone;
     set_utf8(dlg, IDC_CLIENT_ID, p.secrets.client_id);
     check(dlg, IDC_MANUAL_CAPTCHA, p.manual_captcha);
     check(dlg, IDC_BOND, p.bond);
@@ -291,6 +294,8 @@ void read_fields(HWND dlg, Profile& p) {
     p.streams = ok ? static_cast<int>(streams) : 0;
     p.obf_profile = combo_value(dlg, IDC_OBF, kObf);
     p.secrets.obf_key = get_utf8(dlg, IDC_OBF_KEY);
+    const UINT timing = GetDlgItemInt(dlg, IDC_OBF_TIMING, &ok, FALSE);
+    p.obf_timing_ms = ok && p.obf_profile != kObfNone ? static_cast<int>(timing) : 0;
     p.secrets.client_id = get_utf8(dlg, IDC_CLIENT_ID);
     p.manual_captcha = checked(dlg, IDC_MANUAL_CAPTCHA);
     p.bond = checked(dlg, IDC_BOND);
@@ -320,6 +325,21 @@ void center_on_owner(HWND dlg) {
     const int h = self.bottom - self.top;
     SetWindowPos(dlg, nullptr, owner.left + ((owner.right - owner.left) - w) / 2,
                  owner.top + ((owner.bottom - owner.top) - h) / 2, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+}
+
+void add_tooltip(HWND dlg, int id, const wchar_t* text) {
+    HWND tip = CreateWindowExW(
+        WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, dlg, nullptr, GetModuleHandleW(nullptr), nullptr);
+    TOOLINFOW ti{};
+    ti.cbSize = sizeof(ti);
+    ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    ti.hwnd = dlg;
+    ti.uId = reinterpret_cast<UINT_PTR>(GetDlgItem(dlg, id));
+    ti.lpszText = const_cast<wchar_t*>(text);
+    SendMessageW(tip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
+    SendMessageW(tip, TTM_SETMAXTIPWIDTH, 0, 320);
+    SendMessageW(tip, TTM_SETDELAYTIME, TTDT_AUTOPOP, 30'000);
 }
 
 bool try_link(HWND dlg, ProfileCtx& ctx, bool report) {
@@ -395,6 +415,9 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         set_label(dlg, IDC_LBL_STREAMS, S::DlgStreams);
         set_label(dlg, IDC_LBL_OBF, S::DlgObf);
         set_label(dlg, IDC_LBL_OBF_KEY, S::DlgObfKey);
+        set_label(dlg, IDC_LBL_OBF_TIMING, S::DlgObfTiming);
+        set_label(dlg, IDC_OBF_UNIT, S::DlgObfTimingUnit);
+        add_tooltip(dlg, IDC_OBF_TIMING, tr(S::DlgObfTimingHint));
         SendDlgItemMessageW(dlg, IDC_LINK, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"freeturn://"));
         SendDlgItemMessageW(dlg, IDC_PEER, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"host:port"));
         set_label(dlg, IDC_LBL_CLIENT_ID, S::DlgClientId);
@@ -434,6 +457,16 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             // Ссылку вставили прямо в поле - разбираем молча, ошибку покажет OK или Вставить.
             if (HIWORD(wp) == EN_CHANGE && !ctx->loading) {
                 try_link(dlg, *ctx, false);
+            }
+            return TRUE;
+        case IDC_OBF:
+            // Пейсинг без обфускации ядро не принимает.
+            if (HIWORD(wp) == CBN_SELCHANGE && !ctx->loading) {
+                const bool obf = combo_value(dlg, IDC_OBF, kObf) != kObfNone;
+                if (obf != ctx->obf) {
+                    SetDlgItemInt(dlg, IDC_OBF_TIMING, obf ? kDefaultObfTimingMs : 0, FALSE);
+                    ctx->obf = obf;
+                }
             }
             return TRUE;
         case IDC_PASTE:
