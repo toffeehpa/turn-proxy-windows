@@ -57,7 +57,7 @@ CI проверяет формат тем clang-format, что стоит на `
 
 ## Иконки
 
-`res/icons/*.ico` собираются из `res/freeturn-logo-512.png` скриптом `tools/make_icons.sh` (нужен ImageMagick 7). В трее - только знак F: серый, жёлтый и цветной.
+`res/icons/*.ico` собираются из `res/freeturn-logo-512.png` скриптом `tools/make_icons.sh` (нужен ImageMagick 7). В трее - только знак F: серый, жёлтый и цветной. Значок приложения - тоже знак без подложки, с 20 px с кругляшом стадии (β).
 
 ## Выпуск
 
