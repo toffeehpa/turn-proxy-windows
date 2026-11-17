@@ -10,6 +10,7 @@ namespace ft {
 
 struct Settings {
     std::string last_profile_id;
+    bool launch_on_logon = false;
     bool connect_on_start = false;
     bool auto_reconnect = true;
     bool verbose_core_log = false;

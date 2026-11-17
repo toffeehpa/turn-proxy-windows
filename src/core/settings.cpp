@@ -6,6 +6,7 @@ json::Value settings_to_json(const Settings& s) {
     return json::Object{
         {"version", 1},
         {"lastProfileId", s.last_profile_id},
+        {"launchOnLogon", s.launch_on_logon},
         {"connectOnStart", s.connect_on_start},
         {"autoReconnect", s.auto_reconnect},
         {"verboseCoreLog", s.verbose_core_log},
@@ -25,6 +26,7 @@ Settings settings_from_json(const json::Value& v) {
         return x != nullptr ? x->as_bool(def) : def;
     };
     s.last_profile_id = str("lastProfileId");
+    s.launch_on_logon = flag(v.find("launchOnLogon"), s.launch_on_logon);
     s.connect_on_start = flag(v.find("connectOnStart"), s.connect_on_start);
     s.auto_reconnect = flag(v.find("autoReconnect"), s.auto_reconnect);
     s.verbose_core_log = flag(v.find("verboseCoreLog"), s.verbose_core_log);

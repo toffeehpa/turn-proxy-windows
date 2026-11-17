@@ -75,6 +75,21 @@ HICON load_tray_icon(HINSTANCE inst, int id) {
     return icon;
 }
 
+// Автозапуск трея у текущего пользователя: значение в HKCU\...\Run, права администратора не нужны.
+LSTATUS set_launch_on_logon(bool on) {
+    constexpr const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    constexpr const wchar_t* kValue = L"FreeTurn";
+    if (!on) {
+        const LSTATUS st = RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, kValue);
+        return st == ERROR_FILE_NOT_FOUND ? ERROR_SUCCESS : st;
+    }
+    std::wstring exe(32768, L'\0');
+    exe.resize(GetModuleFileNameW(nullptr, exe.data(), static_cast<DWORD>(exe.size())));
+    const std::wstring cmd = L"\"" + exe + L"\"";
+    return RegSetKeyValueW(HKEY_CURRENT_USER, kRunKey, kValue, REG_SZ, cmd.c_str(),
+                           static_cast<DWORD>((cmd.size() + 1) * sizeof(wchar_t)));
+}
+
 } // namespace
 
 void WinReconnectTimer::schedule(std::uint32_t delay_ms) {
@@ -112,6 +127,10 @@ bool App::init() {
     logger_.open(data_dir_ / L"logs" / L"freeturn.log");
     logger_.write(LogLevel::Info, std::format("FreeTurn {} start", kAppVersion));
     load_settings();
+    // Путь мог смениться после переустановки - обновляем запись.
+    if (settings_.launch_on_logon) {
+        sync_launch_on_logon();
+    }
 
     store_ = std::make_unique<ProfileStore>(data_dir_, protector_);
     reload_profiles(false);
@@ -637,9 +656,19 @@ void App::open_settings() {
     if (!settings_dialog(inst_, hwnd_, s, data_dir_, logger_.path())) {
         return;
     }
+    const bool launch_changed = s.launch_on_logon != settings_.launch_on_logon;
     settings_ = s;
     save_settings();
     apply_options();
+    if (launch_changed) {
+        sync_launch_on_logon();
+    }
+}
+
+void App::sync_launch_on_logon() {
+    if (const LSTATUS st = set_launch_on_logon(settings_.launch_on_logon); st != ERROR_SUCCESS) {
+        logger_.write(LogLevel::Warn, std::format("launch on logon: registry error {}", st));
+    }
 }
 
 void App::request_exit() {

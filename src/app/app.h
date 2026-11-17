@@ -47,6 +47,7 @@ private:
     const Profile* find_profile(std::string_view id_or_name) const;
     std::vector<std::string> profile_names() const;
     void apply_options();
+    void sync_launch_on_logon();
 
     void on_change(const ConnectionSnapshot& snap);
     void update_tray(const ConnectionSnapshot& snap);

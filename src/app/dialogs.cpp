@@ -872,6 +872,7 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         set_label(dlg, IDC_GRP_STARTUP, S::DlgGroupStartup);
         set_label(dlg, IDC_GRP_LOG, S::DlgGroupLog);
         set_label(dlg, IDC_GRP_EXPERIMENTAL, S::DlgGroupExperimental);
+        set_label(dlg, IDC_LAUNCH_ON_LOGON, S::DlgLaunchOnLogon);
         set_label(dlg, IDC_CONNECT_ON_START, S::DlgConnectOnStart);
         set_label(dlg, IDC_AUTO_RECONNECT, S::DlgAutoReconnect);
         set_label(dlg, IDC_VERBOSE_LOG, S::DlgVerboseLog);
@@ -883,6 +884,7 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         set_label(dlg, IDCANCEL, S::DlgCancel);
         HICON icon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP));
         SendMessageW(dlg, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
+        check(dlg, IDC_LAUNCH_ON_LOGON, ctx->s.launch_on_logon);
         check(dlg, IDC_CONNECT_ON_START, ctx->s.connect_on_start);
         check(dlg, IDC_AUTO_RECONNECT, ctx->s.auto_reconnect);
         check(dlg, IDC_VERBOSE_LOG, ctx->s.verbose_core_log);
@@ -911,6 +913,7 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             about_dialog(dlg);
             return TRUE;
         case IDOK:
+            ctx->s.launch_on_logon = checked(dlg, IDC_LAUNCH_ON_LOGON);
             ctx->s.connect_on_start = checked(dlg, IDC_CONNECT_ON_START);
             ctx->s.auto_reconnect = checked(dlg, IDC_AUTO_RECONNECT);
             ctx->s.verbose_core_log = checked(dlg, IDC_VERBOSE_LOG);

@@ -101,6 +101,7 @@ enum class S {
     ModeTcp,
     ObfNone,
     DlgSettingsTitle,
+    DlgLaunchOnLogon,
     DlgConnectOnStart,
     DlgAutoReconnect,
     DlgVerboseLog,
