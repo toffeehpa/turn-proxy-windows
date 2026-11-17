@@ -73,6 +73,8 @@ struct Profile {
     std::vector<std::string> dns_servers;
 
     bool manual_captcha = false;
+    // Звонки по очереди: ядру - один, на ошибке ссылки или без связи - следующий.
+    bool rolling_calls = false;
     std::string platform = "desktop";
 
     KcpProfile kcp;

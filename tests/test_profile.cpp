@@ -116,6 +116,7 @@ TEST_CASE("profile json: roundtrip without secrets") {
     p.mode = "tcp";
     p.kcp.interval = 40;
     p.dns_servers = {"1.1.1.1", "8.8.8.8:53"};
+    p.rolling_calls = true;
     const auto pub = json::serialize(profile_to_json(p));
     CHECK(pub.find(test::kKey) == std::string::npos);
     CHECK(pub.find("call/join") == std::string::npos);

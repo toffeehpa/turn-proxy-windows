@@ -126,6 +126,9 @@ bool CoreLogParser::feed(std::string_view raw) {
         status_.captcha = false;
     }
 
+    if (contains(text, "terminal link error")) {
+        status_.link_error = true;
+    }
     if (contains(text, "[Captcha] FATAL") || text.starts_with("fatal: ")) {
         status_.fatal = true;
         status_.last_error = clip(text);

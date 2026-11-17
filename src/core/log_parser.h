@@ -22,6 +22,8 @@ struct EngineStatus {
     int total = 0;
     bool captcha = false;
     bool fatal = false;
+    // VK отверг ссылку звонка: недействительна, звонок завершён или переполнен.
+    bool link_error = false;
     std::string last_error;
 
     bool operator==(const EngineStatus&) const = default;

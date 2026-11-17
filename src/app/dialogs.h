@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <string>
 
+#include "core/connection_manager.h"
 #include "core/profile.h"
 #include "core/settings.h"
 
@@ -15,6 +16,8 @@ struct ProfileDialogOptions {
     bool allow_sfu = false;
     // Ссылка из командной строки или второго экземпляра: подставляется, но не сохраняется без OK.
     std::string initial_link;
+    // Цвета в списке звонков, если профиль сейчас подключён с роллингом.
+    std::vector<CallStatus> calls;
 };
 
 bool profile_dialog(HINSTANCE inst, HWND owner, Profile& p, const ProfileDialogOptions& opts);

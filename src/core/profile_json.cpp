@@ -171,6 +171,7 @@ json::Value profile_to_json(const Profile& p) {
         {"dnsMode", p.dns_mode},
         {"dnsServers", strings_to_json(p.dns_servers)},
         {"manualCaptcha", p.manual_captcha},
+        {"rollingCalls", p.rolling_calls},
         {"platform", p.platform},
         {"kcp", kcp_to_json(p.kcp)},
         {"sfu", json::Object{{"fps", p.sfu_fps}, {"batch", p.sfu_batch}}},
@@ -211,6 +212,7 @@ std::expected<Profile, std::string> profile_from_json(const json::Value& v) {
     p.dns_mode = get_str(v, "dnsMode", p.dns_mode);
     p.dns_servers = strings_from_json(v.find("dnsServers"));
     p.manual_captcha = get_bool(v, "manualCaptcha", false);
+    p.rolling_calls = get_bool(v, "rollingCalls", false);
     p.platform = get_str(v, "platform", p.platform);
     p.kcp = kcp_from_json(v.find("kcp"));
     if (const auto* sfu = v.find("sfu"); sfu != nullptr) {

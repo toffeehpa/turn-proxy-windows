@@ -253,3 +253,144 @@ TEST_CASE("cm: backoff schedule") {
     CHECK_EQ(reconnect_delay_ms(4), 16000u);
     CHECK_EQ(reconnect_delay_ms(9), 30000u);
 }
+
+namespace {
+
+Profile rolling_profile() {
+    auto p = test::vk_profile();
+    p.rolling_calls = true;
+    p.secrets.links = {"https://example.invalid/call/join/AAAA", "https://example.invalid/call/join/BBBB",
+                       "https://example.invalid/call/join/CCCC"};
+    return p;
+}
+
+constexpr std::string_view kLinkError =
+    "2026/11/17 09:15:00 [ERROR] [STREAM 1] [VK Auth] terminal link error: invalid join link";
+
+std::vector<CallState> call_states(const ConnectionManager& cm) {
+    std::vector<CallState> out;
+    for (const auto& c : cm.snapshot().calls) {
+        out.push_back(c.state);
+    }
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("cm: rolling hands the core one call and arms the call timer") {
+    Fixture f;
+    f.cm.connect(rolling_profile());
+    CHECK(f.engine.last.profile.secrets.links ==
+          std::vector<std::string>{"https://example.invalid/call/join/AAAA"});
+    CHECK_EQ(f.cm.snapshot().total, 12);
+    CHECK(call_states(f.cm) ==
+          (std::vector<CallState>{CallState::Active, CallState::Unchecked, CallState::Unchecked}));
+    REQUIRE(f.timer.scheduled.has_value());
+    CHECK_EQ(*f.timer.scheduled, kCallTimeoutMs);
+
+    f.up();
+    CHECK(f.cm.state() == S::Connected);
+    CHECK(!f.timer.scheduled.has_value());
+}
+
+TEST_CASE("cm: rolling switches on a link error and keeps statuses") {
+    Fixture f;
+    f.cm.connect(rolling_profile());
+    f.line(kLinkError);
+    CHECK(f.cm.state() == S::Stopping);
+    CHECK_EQ(f.engine.stops, 1);
+    f.exited(0);
+    CHECK(f.cm.state() == S::Connecting);
+    CHECK_EQ(f.engine.starts, 2);
+    CHECK(f.engine.last.profile.secrets.links ==
+          std::vector<std::string>{"https://example.invalid/call/join/BBBB"});
+    CHECK(call_states(f.cm) ==
+          (std::vector<CallState>{CallState::Failed, CallState::Active, CallState::Unchecked}));
+}
+
+TEST_CASE("cm: rolling switches when no stream comes up in time") {
+    Fixture f;
+    f.cm.connect(rolling_profile());
+    f.cm.on_reconnect_timer();
+    CHECK(f.cm.state() == S::Stopping);
+    f.exited(0);
+    CHECK(f.engine.last.profile.secrets.links ==
+          std::vector<std::string>{"https://example.invalid/call/join/BBBB"});
+}
+
+TEST_CASE("cm: rolling pauses the call timer during manual captcha") {
+    Fixture f;
+    f.cm.connect(rolling_profile());
+    f.line("2026/11/17 09:15:00 [INFO] [STREAM 1] [Captcha] Triggering manual captcha fallback");
+    CHECK(f.cm.state() == S::Captcha);
+    CHECK(!f.timer.scheduled.has_value());
+    f.cm.on_reconnect_timer();
+    CHECK(f.cm.state() == S::Captcha);
+    f.line("2026/11/17 09:15:30 [INFO] [STREAM 1] [Captcha] Got token from browser");
+    CHECK(f.cm.state() == S::Connecting);
+    REQUIRE(f.timer.scheduled.has_value());
+    CHECK_EQ(*f.timer.scheduled, kCallTimeoutMs);
+}
+
+TEST_CASE("cm: rolling keeps a call that still has live streams") {
+    Fixture f;
+    f.cm.connect(rolling_profile());
+    f.up();
+    f.line(kLinkError);
+    CHECK(f.cm.state() == S::Connected);
+    CHECK_EQ(f.engine.stops, 0);
+}
+
+TEST_CASE("cm: rolling stops when every call failed, manual connect starts over") {
+    Fixture f;
+    f.cm.connect(rolling_profile());
+    for (int i = 0; i < 2; ++i) {
+        f.line(kLinkError);
+        f.exited(0);
+    }
+    f.line(kLinkError);
+    CHECK(f.cm.state() == S::Stopping);
+    f.exited(0);
+    CHECK(f.cm.state() == S::Disconnected);
+    CHECK_EQ(f.engine.starts, 3);
+    CHECK_EQ(f.cm.snapshot().error, std::string("all VK calls failed"));
+    CHECK(call_states(f.cm) ==
+          (std::vector<CallState>{CallState::Failed, CallState::Failed, CallState::Failed}));
+
+    f.cm.connect(rolling_profile());
+    CHECK(call_states(f.cm) ==
+          (std::vector<CallState>{CallState::Active, CallState::Unchecked, CallState::Unchecked}));
+}
+
+TEST_CASE("cm: without rolling all calls run at once and link errors do not switch") {
+    Fixture f;
+    auto p = rolling_profile();
+    p.rolling_calls = false;
+    f.cm.connect(p);
+    CHECK_EQ(f.engine.last.profile.secrets.links.size(), std::size_t{3});
+    CHECK_EQ(f.cm.snapshot().total, 36);
+    CHECK(f.cm.snapshot().calls.empty());
+    CHECK(!f.timer.scheduled.has_value());
+    f.line(kLinkError);
+    CHECK(f.cm.state() == S::Connecting);
+    CHECK_EQ(f.engine.stops, 0);
+}
+
+TEST_CASE("cm: rolling switches calls when the core exits on a link error") {
+    Fixture f;
+    f.cm.connect(rolling_profile());
+    f.up();
+    f.exited(2);
+    REQUIRE(f.cm.state() == S::Reconnecting);
+    CHECK_EQ(f.cm.snapshot().attempt, 1);
+    f.cm.on_reconnect_timer();
+    f.up();
+    f.line(kLinkError);
+    CHECK(f.cm.state() == S::Connected);
+    f.exited(1);
+    CHECK(f.cm.state() == S::Reconnecting);
+    CHECK_EQ(f.cm.snapshot().attempt, 0);
+    f.cm.on_reconnect_timer();
+    CHECK(f.engine.last.profile.secrets.links ==
+          std::vector<std::string>{"https://example.invalid/call/join/BBBB"});
+}

@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "core/connection_state.h"
 #include "core/engine.h"
@@ -11,6 +12,15 @@
 #include "core/profile.h"
 
 namespace ft {
+
+enum class CallState { Unchecked, Active, Failed };
+
+struct CallStatus {
+    std::string link;
+    CallState state = CallState::Unchecked;
+
+    bool operator==(const CallStatus&) const = default;
+};
 
 struct ConnectionSnapshot {
     ConnectionState state = ConnectionState::Disconnected;
@@ -21,6 +31,8 @@ struct ConnectionSnapshot {
     int total = 0;
     int attempt = 0;
     std::string error;
+    // Только при роллинге звонков, в порядке очереди профиля.
+    std::vector<CallStatus> calls;
 };
 
 struct ConnectionOptions {
@@ -41,6 +53,8 @@ enum class ConnectResult {
 };
 
 inline constexpr int kMaxReconnectAttempts = 5;
+// Роллинг: столько ждём хотя бы один поток от звонка, пока не перейти к следующему. Капча не в счёт.
+inline constexpr std::uint32_t kCallTimeoutMs = 60'000;
 
 // Пауза перед попыткой n (с 1): 2, 4, 8, 16, 30 с.
 std::uint32_t reconnect_delay_ms(int attempt);
@@ -73,6 +87,10 @@ private:
     ConnectResult start_engine();
     void apply_status();
     void handle_exit(int exit_code);
+    bool rolling() const;
+    void reset_calls();
+    bool advance_call();
+    void roll_call();
     void log(LogLevel level, std::string_view text);
     void notify();
 
@@ -90,6 +108,9 @@ private:
     CoreLogParser parser_;
     SecretRedactor redactor_;
     bool ever_connected_ = false;
+    std::size_t call_ = 0;
+    // Перезапуск ядра ради следующего звонка: статусы звонков не сбрасываем.
+    bool rolling_restart_ = false;
 };
 
 } // namespace ft

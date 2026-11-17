@@ -1,5 +1,6 @@
 #include "app/dialogs.h"
 
+#include <commctrl.h>
 #include <commdlg.h>
 #include <dwmapi.h>
 #include <shellapi.h>
@@ -10,6 +11,7 @@
 #include <cwchar>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 #include "app/strings.h"
 #include "core/freeturn_uri.h"
@@ -248,8 +250,8 @@ constexpr std::array kAdvancedIds = {
     IDC_OBF,        IDC_LBL_OBF_KEY,   IDC_OBF_KEY,   IDC_LBL_OBF_TIMING, IDC_OBF_TIMING,
     IDC_OBF_UNIT,   IDC_LBL_CLIENT_ID, IDC_CLIENT_ID, IDC_MANUAL_CAPTCHA, IDC_BOND};
 // Ряд кнопок в DLU: под потоками и под последним полем "Дополнительно".
-constexpr int kButtonsY = 133;
-constexpr int kButtonsAdvancedY = 329;
+constexpr int kButtonsY = 107;
+constexpr int kButtonsAdvancedY = 303;
 // Предел ползунка - как в Android.
 constexpr int kMaxStreams = 128;
 
@@ -316,14 +318,10 @@ void load_fields(HWND dlg, ProfileCtx& ctx) {
     const bool sfu_visible = ctx.opts.allow_sfu || p.provider == kProviderSfu;
     fill_combo(dlg, IDC_PROVIDER, kProviders, p.provider, sfu_visible ? kProviders.size() : 2);
     set_utf8(dlg, IDC_PEER, p.peer);
-    std::string links;
-    for (const auto& l : p.secrets.links) {
-        if (!links.empty()) {
-            links += "\r\n";
-        }
-        links += l;
-    }
-    set_utf8(dlg, IDC_LINKS, links);
+    set_utf8(dlg, IDC_LINKS, p.secrets.links.empty() ? std::string() : p.secrets.links.front());
+    const auto calls = p.secrets.links.size();
+    SetDlgItemTextW(dlg, IDC_CALLS,
+                    calls > 1 ? trf(S::DlgCallsCount, {std::to_wstring(calls)}).c_str() : tr(S::DlgCalls));
     set_utf8(dlg, IDC_LISTEN, p.listen);
     fill_combo(dlg, IDC_MODE, kModes, p.mode);
     check(dlg, IDC_TRANSPORT_UDP, p.transport == kTransportUdp);
@@ -346,22 +344,13 @@ void read_fields(HWND dlg, Profile& p) {
     p.name = sanitize_name(get_utf8(dlg, IDC_NAME));
     p.provider = combo_value(dlg, IDC_PROVIDER, kProviders);
     p.peer = get_utf8(dlg, IDC_PEER);
-    p.secrets.links.clear();
-    const std::string links = get_utf8(dlg, IDC_LINKS);
-    std::size_t start = 0;
-    while (start <= links.size()) {
-        auto end = links.find_first_of("\r\n", start);
-        if (end == std::string::npos) {
-            end = links.size();
-        }
-        std::string line = links.substr(start, end - start);
-        while (!line.empty() && line.back() == ' ') {
-            line.pop_back();
-        }
-        if (const auto first = line.find_first_not_of(' '); first != std::string::npos) {
-            p.secrets.links.push_back(line.substr(first));
-        }
-        start = end + 1;
+    // В поле - первый звонок списка, остальные правятся в окне "Список".
+    auto& links = p.secrets.links;
+    if (!links.empty()) {
+        links.erase(links.begin());
+    }
+    if (const std::string call = get_utf8(dlg, IDC_LINKS); !call.empty()) {
+        links.insert(links.begin(), call);
     }
     p.listen = get_utf8(dlg, IDC_LISTEN);
     p.mode = combo_value(dlg, IDC_MODE, kModes);
@@ -399,7 +388,7 @@ void merge_imported(HWND dlg, ProfileCtx& ctx, Profile imported) {
     load_fields(dlg, ctx);
 }
 
-// DS_CENTER ставит окно в центр экрана, а «О программе» открывается поверх настроек.
+// DS_CENTER ставит окно в центр экрана, а список звонков открывается поверх окна профиля.
 void center_on_owner(HWND dlg) {
     RECT owner{};
     RECT self{};
@@ -409,6 +398,49 @@ void center_on_owner(HWND dlg) {
     const int h = self.bottom - self.top;
     SetWindowPos(dlg, nullptr, owner.left + ((owner.right - owner.left) - w) / 2,
                  owner.top + ((owner.bottom - owner.top) - h) / 2, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+}
+
+struct CallsCtx {
+    std::vector<std::string> links;
+    bool rolling = false;
+    std::vector<CallStatus> statuses;
+    Theme theme;
+};
+
+COLORREF call_color(const CallsCtx& ctx, const std::string& link) {
+    const auto it = std::ranges::find(ctx.statuses, link, &CallStatus::link);
+    switch (it == ctx.statuses.end() ? CallState::Unchecked : it->state) {
+    case CallState::Active:
+        return ctx.theme.dark ? RGB(167, 139, 250) : RGB(123, 97, 209);
+    case CallState::Failed:
+        return ctx.theme.dark ? RGB(255, 99, 99) : RGB(196, 43, 28);
+    case CallState::Unchecked:
+        break;
+    }
+    return ctx.theme.dark ? Theme::kText : GetSysColor(COLOR_WINDOWTEXT);
+}
+
+// Свой рисунок строки, чтобы цвет статуса звонка был виден и у выделенной.
+void draw_call(const CallsCtx& ctx, const DRAWITEMSTRUCT& dis) {
+    const bool selected = (dis.itemState & ODS_SELECTED) != 0;
+    COLORREF bg = ctx.theme.dark ? Theme::kCtl : GetSysColor(COLOR_WINDOW);
+    if (selected) {
+        bg = ctx.theme.dark ? RGB(77, 77, 77) : RGB(204, 232, 255);
+    }
+    SetDCBrushColor(dis.hDC, bg);
+    FillRect(dis.hDC, &dis.rcItem, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+    if (dis.itemID < ctx.links.size()) {
+        const auto& link = ctx.links[dis.itemID];
+        const std::wstring text = std::to_wstring(dis.itemID + 1) + L".  " + win::widen(link);
+        RECT r = dis.rcItem;
+        r.left += 4;
+        SetBkMode(dis.hDC, TRANSPARENT);
+        SetTextColor(dis.hDC, call_color(ctx, link));
+        DrawTextW(dis.hDC, text.c_str(), -1, &r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
+    if ((dis.itemState & ODS_FOCUS) != 0) {
+        DrawFocusRect(dis.hDC, &dis.rcItem);
+    }
 }
 
 void add_tooltip(HWND dlg, int id, const wchar_t* text) {
@@ -424,6 +456,152 @@ void add_tooltip(HWND dlg, int id, const wchar_t* text) {
     SendMessageW(tip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
     SendMessageW(tip, TTM_SETMAXTIPWIDTH, 0, 320);
     SendMessageW(tip, TTM_SETDELAYTIME, TTDT_AUTOPOP, 30'000);
+}
+
+void fill_calls(HWND dlg, const CallsCtx& ctx, int select) {
+    HWND list = GetDlgItem(dlg, IDC_CALL_LIST);
+    SendMessageW(list, LB_RESETCONTENT, 0, 0);
+    for (std::size_t i = 0; i < ctx.links.size(); ++i) {
+        const std::wstring item = std::to_wstring(i + 1) + L".  " + win::widen(ctx.links[i]);
+        SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(item.c_str()));
+    }
+    if (!ctx.links.empty()) {
+        select = std::clamp(select, 0, static_cast<int>(ctx.links.size()) - 1);
+        SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(select), 0);
+    }
+}
+
+int selected_call(HWND dlg) {
+    return static_cast<int>(SendDlgItemMessageW(dlg, IDC_CALL_LIST, LB_GETCURSEL, 0, 0));
+}
+
+// Вставка нескольких ссылок разом: делим по пробелам, переводам строк и запятым.
+void add_calls(HWND dlg, CallsCtx& ctx) {
+    const std::string text = get_utf8(dlg, IDC_CALL_NEW);
+    std::size_t start = 0;
+    while (start < text.size()) {
+        const auto end = std::min(text.find_first_of(" \t\r\n,", start), text.size());
+        std::string call = text.substr(start, end - start);
+        if (!call.empty() && std::ranges::find(ctx.links, call) == ctx.links.end()) {
+            ctx.links.push_back(std::move(call));
+        }
+        start = end + 1;
+    }
+    SetDlgItemTextW(dlg, IDC_CALL_NEW, L"");
+    fill_calls(dlg, ctx, static_cast<int>(ctx.links.size()) - 1);
+}
+
+void move_call(HWND dlg, CallsCtx& ctx, int delta) {
+    const int i = selected_call(dlg);
+    const int j = i + delta;
+    if (i < 0 || j < 0 || j >= static_cast<int>(ctx.links.size())) {
+        return;
+    }
+    std::swap(ctx.links[static_cast<std::size_t>(i)], ctx.links[static_cast<std::size_t>(j)]);
+    fill_calls(dlg, ctx, j);
+}
+
+INT_PTR CALLBACK calls_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
+    auto* ctx = reinterpret_cast<CallsCtx*>(GetWindowLongPtrW(dlg, DWLP_USER));
+    switch (msg) {
+    case WM_INITDIALOG:
+        ctx = reinterpret_cast<CallsCtx*>(lp);
+        SetWindowLongPtrW(dlg, DWLP_USER, lp);
+        SetWindowTextW(dlg, tr(S::DlgCallsTitle));
+        set_label(dlg, IDC_LBL_CALL_NEW, S::DlgCallNew);
+        set_label(dlg, IDC_CALL_ADD, S::DlgCallAdd);
+        set_label(dlg, IDC_CALL_UP, S::DlgCallUp);
+        set_label(dlg, IDC_CALL_DOWN, S::DlgCallDown);
+        set_label(dlg, IDC_CALL_REMOVE, S::DlgCallRemove);
+        set_label(dlg, IDC_ROLLING, S::DlgRolling);
+        check(dlg, IDC_ROLLING, ctx->rolling);
+        add_tooltip(dlg, IDC_ROLLING, tr(S::DlgRollingHint));
+        set_label(dlg, IDOK, S::DlgSave);
+        set_label(dlg, IDCANCEL, S::DlgCancel);
+        fill_calls(dlg, *ctx, 0);
+        apply_theme(dlg, ctx->theme);
+        center_on_owner(dlg);
+        return TRUE;
+    case WM_MEASUREITEM: {
+        // Приходит до WM_INITDIALOG: высота строки - от шрифта окна.
+        auto* mis = reinterpret_cast<MEASUREITEMSTRUCT*>(lp);
+        if (mis->CtlID != IDC_CALL_LIST) {
+            return FALSE;
+        }
+        RECT r{0, 0, 0, 11};
+        MapDialogRect(dlg, &r);
+        mis->itemHeight = static_cast<UINT>(r.bottom);
+        return TRUE;
+    }
+    case WM_DRAWITEM: {
+        const auto* dis = reinterpret_cast<const DRAWITEMSTRUCT*>(lp);
+        if (ctx == nullptr || dis->CtlID != IDC_CALL_LIST) {
+            return FALSE;
+        }
+        draw_call(*ctx, *dis);
+        return TRUE;
+    }
+    case WM_CTLCOLORDLG:
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+        return ctx != nullptr ? theme_color(ctx->theme, msg, wp) : 0;
+    case WM_COMMAND:
+        if (ctx == nullptr) {
+            return FALSE;
+        }
+        switch (LOWORD(wp)) {
+        case IDC_CALL_ADD:
+            add_calls(dlg, *ctx);
+            return TRUE;
+        case IDC_CALL_UP:
+            move_call(dlg, *ctx, -1);
+            return TRUE;
+        case IDC_CALL_DOWN:
+            move_call(dlg, *ctx, 1);
+            return TRUE;
+        case IDC_CALL_REMOVE:
+            if (const int i = selected_call(dlg); i >= 0 && i < static_cast<int>(ctx->links.size())) {
+                ctx->links.erase(ctx->links.begin() + i);
+                fill_calls(dlg, *ctx, i);
+            }
+            return TRUE;
+        case IDOK:
+            // Enter в поле ссылки добавляет её, а не закрывает окно.
+            if (GetFocus() == GetDlgItem(dlg, IDC_CALL_NEW) && GetWindowTextLengthW(GetFocus()) > 0) {
+                add_calls(dlg, *ctx);
+                return TRUE;
+            }
+            ctx->rolling = checked(dlg, IDC_ROLLING);
+            EndDialog(dlg, IDOK);
+            return TRUE;
+        case IDCANCEL:
+            EndDialog(dlg, IDCANCEL);
+            return TRUE;
+        default:
+            return FALSE;
+        }
+    default:
+        return FALSE;
+    }
+}
+
+void edit_calls(HWND dlg, ProfileCtx& ctx) {
+    Profile current = ctx.p;
+    read_fields(dlg, current);
+    CallsCtx calls;
+    calls.links = current.secrets.links;
+    calls.rolling = current.rolling_calls;
+    calls.statuses = ctx.opts.calls;
+    if (DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CALLS), dlg, calls_proc,
+                        reinterpret_cast<LPARAM>(&calls)) != IDOK) {
+        return;
+    }
+    current.secrets.links = std::move(calls.links);
+    current.rolling_calls = calls.rolling;
+    ctx.p = std::move(current);
+    load_fields(dlg, ctx);
 }
 
 bool try_link(HWND dlg, ProfileCtx& ctx, bool report) {
@@ -582,6 +760,9 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             return TRUE;
         case IDC_ADVANCED:
             set_advanced(dlg, *ctx, !ctx->advanced);
+            return TRUE;
+        case IDC_CALLS:
+            edit_calls(dlg, *ctx);
             return TRUE;
         case IDC_PASTE:
             if (auto text = clipboard_text(dlg); text && text->find("freeturn://") != std::string::npos) {

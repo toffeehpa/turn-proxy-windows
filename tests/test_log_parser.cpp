@@ -78,3 +78,13 @@ TEST_CASE("log: redactor") {
     const auto out = r.apply("link https://example.invalid/call/join/supersecretkey key supersecretkey abc");
     CHECK_EQ(out, std::string("link *** key *** abc"));
 }
+
+TEST_CASE("log: terminal link error") {
+    CoreLogParser p;
+    CHECK(p.feed("2026/11/17 09:15:00 [ERROR] [STREAM 1] [VK Auth] Failed with client_id=1: timeout"));
+    CHECK(!p.status().link_error);
+    CHECK(p.feed("2026/11/17 09:15:01 [ERROR] [STREAM 1] [VK Auth] terminal link error: invalid join link"));
+    CHECK(p.status().link_error);
+    p.reset();
+    CHECK(!p.status().link_error);
+}

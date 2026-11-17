@@ -359,9 +359,12 @@ void App::on_change(const ConnectionSnapshot& snap) {
             tray_.balloon(menu_text(snap.profile_name), tr(S::NotifyCaptcha));
             break;
         case ConnectionState::Reconnecting:
-            tray_.balloon(menu_text(snap.profile_name),
-                          trf(S::NotifyReconnecting,
-                              {std::to_wstring(snap.attempt), std::to_wstring(kMaxReconnectAttempts)}));
+            // attempt 0 - роллинг перешёл к следующему звонку: об этом говорит только цвет в списке.
+            if (snap.attempt > 0) {
+                tray_.balloon(menu_text(snap.profile_name),
+                              trf(S::NotifyReconnecting,
+                                  {std::to_wstring(snap.attempt), std::to_wstring(kMaxReconnectAttempts)}));
+            }
             break;
         case ConnectionState::Error:
             tray_.balloon(menu_text(snap.profile_name),
@@ -570,6 +573,9 @@ void App::edit_selected() {
     Profile p = *sel;
     ProfileDialogOptions opts;
     opts.allow_sfu = settings_.experimental_sfu;
+    if (manager_->snapshot().profile_id == p.id) {
+        opts.calls = manager_->snapshot().calls;
+    }
     if (!profile_dialog(inst_, hwnd_, p, opts)) {
         return;
     }

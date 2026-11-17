@@ -59,8 +59,10 @@ ConnectResult ConnectionManager::connect(const Profile& p) {
         timer_.cancel();
         profile_ = p;
         pending_.reset();
+        rolling_restart_ = false;
         snap_.attempt = 0;
         ever_connected_ = false;
+        reset_calls();
         return start_engine();
     case ConnectionState::Starting:
     case ConnectionState::Connecting:
@@ -70,12 +72,14 @@ ConnectResult ConnectionManager::connect(const Profile& p) {
             return ConnectResult::AlreadyActive;
         }
         pending_ = p;
+        rolling_restart_ = false;
         transition(ConnectionState::Stopping);
         notify();
         engine_.stop();
         return ConnectResult::Switching;
     case ConnectionState::Stopping:
         pending_ = p;
+        rolling_restart_ = false;
         return ConnectResult::Queued;
     }
     return ConnectResult::LaunchFailed;
@@ -99,15 +103,24 @@ ConnectResult ConnectionManager::start_engine() {
     snap_.profile_name = p.name;
     snap_.local_address = p.local_address();
     snap_.active = 0;
+    const bool roll = rolling();
     const int groups =
-        p.provider == kProviderVk ? std::max<int>(static_cast<int>(p.secrets.links.size()), 1) : 1;
+        p.provider == kProviderVk && !roll ? std::max<int>(static_cast<int>(p.secrets.links.size()), 1) : 1;
     snap_.total = p.effective_streams() * groups;
     snap_.error.clear();
-    notify();
 
     EngineLaunch launch;
     launch.profile = p;
-    launch.args = build_core_args(p);
+    if (roll) {
+        if (snap_.calls.size() != p.secrets.links.size()) {
+            reset_calls();
+        }
+        launch.profile.secrets.links = {p.secrets.links[call_]};
+        snap_.calls[call_].state = CallState::Active;
+        log(LogLevel::Info, std::format("rolling calls: call {} of {}", call_ + 1, snap_.calls.size()));
+    }
+    notify();
+    launch.args = build_core_args(launch.profile);
     launch.display_args = redact_core_args(launch.args);
     std::string shown;
     for (const auto& a : launch.display_args) {
@@ -125,12 +138,16 @@ ConnectResult ConnectionManager::start_engine() {
         return ConnectResult::LaunchFailed;
     }
     transition(ConnectionState::Connecting);
+    if (roll) {
+        timer_.schedule(kCallTimeoutMs);
+    }
     notify();
     return ConnectResult::Started;
 }
 
 void ConnectionManager::disconnect() {
     pending_.reset();
+    rolling_restart_ = false;
     switch (snap_.state) {
     case ConnectionState::Starting:
     case ConnectionState::Connecting:
@@ -215,6 +232,12 @@ void ConnectionManager::apply_status() {
         notify();
         return;
     }
+    // Пока хоть один поток жив, звонок работает: ошибка ссылки - только на новых потоках.
+    if (rolling() && st.link_error && st.active == 0) {
+        log(LogLevel::Warn, std::format("rolling calls: call {} rejected by VK", call_ + 1));
+        roll_call();
+        return;
+    }
     ConnectionState target = ConnectionState::Connecting;
     if (st.captcha) {
         target = ConnectionState::Captcha;
@@ -226,6 +249,13 @@ void ConnectionManager::apply_status() {
     }
     if (target != s) {
         transition(target);
+        if (rolling()) {
+            if (target == ConnectionState::Connecting) {
+                timer_.schedule(kCallTimeoutMs);
+            } else if (s == ConnectionState::Connecting) {
+                timer_.cancel();
+            }
+        }
     }
     notify();
 }
@@ -241,6 +271,10 @@ void ConnectionManager::handle_exit(int exit_code) {
             pending_.reset();
             snap_.attempt = 0;
             ever_connected_ = false;
+            if (!rolling_restart_) {
+                reset_calls();
+            }
+            rolling_restart_ = false;
             start_engine();
             return;
         }
@@ -258,6 +292,20 @@ void ConnectionManager::handle_exit(int exit_code) {
     snap_.error = st.last_error.empty() ? std::format("freeturn-core.exe exited with code {}", exit_code)
                                         : redactor_.apply(st.last_error);
 
+    if (rolling() && st.link_error) {
+        if (advance_call()) {
+            snap_.attempt = 0;
+            transition(ConnectionState::Reconnecting);
+            timer_.schedule(reconnect_delay_ms(1));
+            log(LogLevel::Warn, std::format("rolling calls: switching to call {}", call_ + 1));
+        } else {
+            snap_.error = "all VK calls failed";
+            transition(ConnectionState::Error);
+        }
+        notify();
+        return;
+    }
+
     // Ошибки конфига и проваленная капча повторами не лечатся - ждём пользователя.
     if (opts_.auto_reconnect && ever_connected_ && !st.fatal && snap_.attempt < kMaxReconnectAttempts) {
         ++snap_.attempt;
@@ -272,10 +320,62 @@ void ConnectionManager::handle_exit(int exit_code) {
 }
 
 void ConnectionManager::on_reconnect_timer() {
+    // При роллинге тот же таймер в Connecting - срок звонка.
+    if (rolling() && snap_.state == ConnectionState::Connecting) {
+        log(LogLevel::Warn,
+            std::format("rolling calls: call {} gave no streams in {} s", call_ + 1, kCallTimeoutMs / 1000));
+        roll_call();
+        return;
+    }
     if (snap_.state != ConnectionState::Reconnecting) {
         return;
     }
     start_engine();
+}
+
+bool ConnectionManager::rolling() const {
+    return profile_ && profile_->rolling_calls && profile_->provider == kProviderVk &&
+           profile_->secrets.links.size() > 1;
+}
+
+void ConnectionManager::reset_calls() {
+    call_ = 0;
+    snap_.calls.clear();
+    if (rolling()) {
+        for (const auto& l : profile_->secrets.links) {
+            snap_.calls.push_back({l, CallState::Unchecked});
+        }
+    }
+}
+
+// Текущий звонок - в красные, дальше по кругу первый не красный. false - красные все.
+bool ConnectionManager::advance_call() {
+    snap_.calls[call_].state = CallState::Failed;
+    const std::size_t n = snap_.calls.size();
+    for (std::size_t k = 1; k < n; ++k) {
+        const std::size_t j = (call_ + k) % n;
+        if (snap_.calls[j].state != CallState::Failed) {
+            call_ = j;
+            return true;
+        }
+    }
+    return false;
+}
+
+void ConnectionManager::roll_call() {
+    timer_.cancel();
+    if (advance_call()) {
+        log(LogLevel::Warn, std::format("rolling calls: switching to call {}", call_ + 1));
+        pending_ = profile_;
+        rolling_restart_ = true;
+    } else {
+        log(LogLevel::Error, "rolling calls: all VK calls failed");
+        snap_.error = "all VK calls failed";
+        pending_.reset();
+    }
+    transition(ConnectionState::Stopping);
+    notify();
+    engine_.stop();
 }
 
 } // namespace ft
