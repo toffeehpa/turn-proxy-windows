@@ -245,15 +245,17 @@ struct ProfileCtx {
 
 // Всё, кроме ссылки, имени, звонков, транспорта и потоков, - под "Дополнительно", вместе с импортом из файла.
 constexpr std::array kAdvancedIds = {
-    IDC_FROM_FILE,  IDC_LBL_PROVIDER,  IDC_PROVIDER,  IDC_LBL_PEER,       IDC_PEER,
-    IDC_LBL_LISTEN, IDC_LISTEN,        IDC_LBL_MODE,  IDC_MODE,           IDC_LBL_OBF,
-    IDC_OBF,        IDC_LBL_OBF_KEY,   IDC_OBF_KEY,   IDC_LBL_OBF_TIMING, IDC_OBF_TIMING,
-    IDC_OBF_UNIT,   IDC_LBL_CLIENT_ID, IDC_CLIENT_ID, IDC_MANUAL_CAPTCHA, IDC_BOND};
+    IDC_FROM_FILE,  IDC_LBL_PROVIDER,   IDC_PROVIDER,   IDC_LBL_PEER, IDC_PEER,
+    IDC_LBL_LISTEN, IDC_LISTEN,         IDC_LBL_MODE,   IDC_MODE,     IDC_LBL_PER_CRED,
+    IDC_PER_CRED,   IDC_PER_CRED_HINT,  IDC_LBL_OBF,    IDC_OBF,      IDC_LBL_OBF_KEY,
+    IDC_OBF_KEY,    IDC_LBL_OBF_TIMING, IDC_OBF_TIMING, IDC_OBF_UNIT, IDC_LBL_CLIENT_ID,
+    IDC_CLIENT_ID,  IDC_MANUAL_CAPTCHA, IDC_BOND};
 // Ряд кнопок в DLU: под потоками и под последним полем "Дополнительно".
 constexpr int kButtonsY = 107;
-constexpr int kButtonsAdvancedY = 303;
-// Предел ползунка - как в Android.
+constexpr int kButtonsAdvancedY = 331;
+// Пределы ползунков - как в Android.
 constexpr int kMaxStreams = 128;
+constexpr int kMaxStreamsPerCred = 50;
 
 void set_advanced(HWND dlg, ProfileCtx& ctx, bool on) {
     ctx.advanced = on;
@@ -294,6 +296,7 @@ int default_streams(std::string_view provider) {
 
 void enable_streams(HWND dlg, std::string_view provider) {
     EnableWindow(GetDlgItem(dlg, IDC_STREAMS), provider != kProviderSfu);
+    EnableWindow(GetDlgItem(dlg, IDC_PER_CRED), provider == kProviderVk);
 }
 
 int slider(HWND dlg, int id) {
@@ -304,6 +307,8 @@ int slider(HWND dlg, int id) {
 void show_sliders(HWND dlg) {
     SetDlgItemTextW(dlg, IDC_LBL_STREAMS,
                     trf(S::DlgStreams, {std::to_wstring(slider(dlg, IDC_STREAMS))}).c_str());
+    SetDlgItemTextW(dlg, IDC_LBL_PER_CRED,
+                    trf(S::DlgStreamsPerCred, {std::to_wstring(slider(dlg, IDC_PER_CRED))}).c_str());
 }
 
 void set_slider(HWND dlg, int id, int value) {
@@ -327,6 +332,7 @@ void load_fields(HWND dlg, ProfileCtx& ctx) {
     check(dlg, IDC_TRANSPORT_UDP, p.transport == kTransportUdp);
     check(dlg, IDC_TRANSPORT_TCP, p.transport != kTransportUdp);
     set_slider(dlg, IDC_STREAMS, p.effective_streams());
+    set_slider(dlg, IDC_PER_CRED, p.streams_per_cred);
     enable_streams(dlg, p.provider);
     ctx.provider = p.provider;
     ctx.custom_streams = p.streams;
@@ -364,6 +370,7 @@ void read_fields(HWND dlg, Profile& p) {
     if (was_default && p.streams == default_streams(p.provider)) {
         p.streams = 0;
     }
+    p.streams_per_cred = slider(dlg, IDC_PER_CRED);
     p.obf_profile = combo_value(dlg, IDC_OBF, kObf);
     p.secrets.obf_key = get_utf8(dlg, IDC_OBF_KEY);
     BOOL ok = FALSE;
@@ -680,8 +687,11 @@ INT_PTR CALLBACK profile_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         SetDlgItemTextW(dlg, IDC_TRANSPORT_UDP, L"UDP");
         SetDlgItemTextW(dlg, IDC_TRANSPORT_TCP, L"TCP");
         set_label(dlg, IDC_STREAMS_HINT, S::DlgStreamsHint);
+        set_label(dlg, IDC_PER_CRED_HINT, S::DlgStreamsPerCredHint);
         SendDlgItemMessageW(dlg, IDC_STREAMS, TBM_SETRANGEMIN, FALSE, 1);
         SendDlgItemMessageW(dlg, IDC_STREAMS, TBM_SETRANGEMAX, TRUE, kMaxStreams);
+        SendDlgItemMessageW(dlg, IDC_PER_CRED, TBM_SETRANGEMIN, FALSE, 1);
+        SendDlgItemMessageW(dlg, IDC_PER_CRED, TBM_SETRANGEMAX, TRUE, kMaxStreamsPerCred);
         set_label(dlg, IDC_LBL_OBF, S::DlgObf);
         set_label(dlg, IDC_LBL_OBF_KEY, S::DlgObfKey);
         set_label(dlg, IDC_LBL_OBF_TIMING, S::DlgObfTiming);
