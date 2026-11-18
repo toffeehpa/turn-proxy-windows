@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    name: Build MSI & publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Build
+        run: |
+          cmake -S . -B build -A x64 -DFREETURN_WARNINGS_AS_ERRORS=ON
+          cmake --build build --config Release --parallel
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = 'dist/bin'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item build/Release/FreeTurn.exe, build/Release/freeturn-service.exe, LICENSE, THIRD_PARTY_NOTICES.md $out
+          ./tools/fetch-core.ps1 -OutDir $out -Arch amd64
+          ./tools/fetch-wintun.ps1 -OutDir $out -Arch amd64
+      # Версия - из тега: release-please ставит её и в CMakeLists, и в тег.
+      - name: Installer
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+          $full = $env:GITHUB_REF_NAME.TrimStart('v')
+          $numeric = ($full -split '-')[0]
+          $msi = "freeturn-$full-windows-amd64.msi"
+          wix build installer/FreeTurn.wxs installer/ui.wxs -arch x64 -ext WixToolset.Util.wixext `
+            -d Version=$numeric -d DisplayVersion=$full -d BinDir=dist/bin -d ResDir=res `
+            -o "dist/$msi"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $hash = (Get-FileHash "dist/$msi" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $msi" | Out-File -Encoding ascii dist/checksums.txt
+      # pwsh не раскрывает маски для внешних команд - файлы перечисляем сами.
+      - name: Upload assets to GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload $env:GITHUB_REF_NAME (Get-ChildItem dist/*.msi).FullName dist/checksums.txt --clobber
+
+  notify-telegram:
+    name: Telegram announce
+    runs-on: ubuntu-latest
+    needs: build-and-publish
+    steps:
+      - name: Send release message
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          BODY=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body -q .body | head -c 3000)
+          URL=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json url -q .url)
+          # GH-markdown -> Telegram-HTML: сначала экранируем HTML, потом размечаем.
+          # Хвосты "by @user in <PR-url>" из авто-нотов убираем - в посте это шум.
+          HTML=$(printf '%s' "$BODY" \
+            | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' \
+            | sed -E \
+                -e 's| by @[[:alnum:]_-]+ in https://[^[:space:]]+||g' \
+                -e 's|\[([^]]+)\]\((https?://[^)]+)\)|<a href="\2">\1</a>|g' \
+                -e 's|\*\*([^*]+)\*\*|<b>\1</b>|g' \
+                -e 's|`([^`]+)`|<code>\1</code>|g' \
+                -e 's|^#{1,6}[[:space:]]+(.*)$|<b>\1</b>|' \
+                -e 's|^[-*][[:space:]]+|• |')
+          TEXT=$(printf '🚀 <b>FreeTurn для Windows %s</b>\n\n%s\n\n<a href="%s">Релиз на GitHub</a>' "$GITHUB_REF_NAME" "$HTML" "$URL")
+          send() {
+            curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${CHAT_ID}" \
+              --data-urlencode "text=$1" \
+              --data-urlencode "parse_mode=${2:-}" \
+              --data-urlencode "disable_web_page_preview=true" \
+              -o /dev/null
+          }
+          # Кривой HTML роняет весь sendMessage - фолбэк plain text, чтобы анонс не пропал
+          send "$TEXT" HTML || send "$(printf '🚀 FreeTurn для Windows %s\n\n%s\n\n%s' "$GITHUB_REF_NAME" "$BODY" "$URL")"

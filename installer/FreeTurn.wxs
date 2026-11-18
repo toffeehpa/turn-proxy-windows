@@ -2,6 +2,9 @@
 <!-- MSI на всю машину: файлы в Program Files, чтобы служба от SYSTEM запускала только то, что пользователь не подменит. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <?ifndef DisplayVersion?>
+  <?define DisplayVersion = $(var.Version)?>
+  <?endif?>
   <Package Name="FreeTurn"
            Manufacturer="FreeTurn"
            Version="$(var.Version)"
@@ -16,7 +19,21 @@
     <Icon Id="FreeTurn.ico" SourceFile="$(var.ResDir)\icons\freeturn.ico" />
     <Property Id="ARPPRODUCTICON" Value="FreeTurn.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/toffeehpa/turn-proxy-windows" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/toffeehpa/turn-proxy-windows/releases" />
     <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <!-- Полная версия с beta-суффиксом - для заголовков окон, в MSI идёт только x.y.z. -->
+    <Property Id="DisplayVersion" Value="$(var.DisplayVersion)" />
+
+    <!-- GetDpiForWindow в трее и Go в ядре требуют Windows 10 1607 (сборка 14393). -->
+    <Property Id="WINDOWSBUILD">
+      <RegistrySearch Id="WindowsBuild" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuildNumber" Type="raw" />
+    </Property>
+    <Launch Condition="Installed OR WINDOWSBUILD &gt;= 14393"
+            Message="FreeTurn requires Windows 10 version 1607 or later." />
+
+    <UIRef Id="FreeTurnUI" />
 
     <util:CloseApplication Id="CloseFreeTurn" Target="FreeTurn.exe" CloseMessage="yes" RebootPrompt="no" />
 
@@ -25,7 +42,7 @@
         <Component Id="App">
           <File Id="FreeTurnExe" Source="$(var.BinDir)\FreeTurn.exe" KeyPath="yes">
             <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="FreeTurn"
-                      WorkingDirectory="INSTALLFOLDER" Icon="FreeTurn.ico" Advertise="yes" />
+                      WorkingDirectory="INSTALLFOLDER" Icon="FreeTurn.ico" />
           </File>
         </Component>
         <Component Id="Service">
@@ -59,6 +76,21 @@
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- Трей запускается с последнего окна от имени пользователя, а не установщика с правами администратора. -->
+    <Property Id="WixShellExecTarget" Value="[#FreeTurnExe]" />
+    <CustomAction Id="LaunchFreeTurn" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixShellExec"
+                  Impersonate="yes" />
+
+    <!-- Автозапуск трей пишет в HKCU сам; при удалении стираем его у того, кто удаляет. -->
+    <SetProperty Id="RemoveAutostart" Sequence="execute" Before="RemoveAutostart"
+                 Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE"
+                 Value="&quot;[System64Folder]reg.exe&quot; delete &quot;HKCU\Software\Microsoft\Windows\CurrentVersion\Run&quot; /v FreeTurn /f" />
+    <CustomAction Id="RemoveAutostart" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveAutostart" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
 
     <Feature Id="Main" Title="FreeTurn" Level="1">
       <ComponentRef Id="App" />

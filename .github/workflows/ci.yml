@@ -58,8 +58,8 @@ jobs:
           wix extension add -g WixToolset.Util.wixext/5.0.2
           $full = (Select-String -Path CMakeLists.txt -Pattern 'set\(FREETURN_VERSION "([^"]+)"\)').Matches[0].Groups[1].Value
           $numeric = ($full -split '-')[0]
-          wix build installer/FreeTurn.wxs -arch x64 -ext WixToolset.Util.wixext `
-            -d Version=$numeric -d BinDir=dist/bin -d ResDir=res `
+          wix build installer/FreeTurn.wxs installer/ui.wxs -arch x64 -ext WixToolset.Util.wixext `
+            -d Version=$numeric -d DisplayVersion=$full -d BinDir=dist/bin -d ResDir=res `
             -o "dist/freeturn-$full-windows-amd64.msi"
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Upload

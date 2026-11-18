@@ -59,3 +59,8 @@ magick "$tmp/glyph.png" -channel RGB -colorspace gray -colorspace sRGB +level-co
 ico "$tmp/connecting.png" tray-connecting "${tray_sizes[@]}"
 
 ico "$tmp/glyph.png" tray-on "${tray_sizes[@]}"
+
+# Шапка окон установщика (400x45 DLU): белый фон под заголовком, знак справа, внизу тонкая линия.
+magick -size 1000x112 xc:white \( "$tmp/solid.png" -trim +repage -resize x64 \) -gravity east -geometry +40+0 \
+    -compose over -composite -fill "#d9d9d9" -draw "line 0,111 999,111" -alpha off -type truecolor \
+    BMP3:installer-header.bmp

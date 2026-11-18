@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Окна установщика по раскладке OpenVPN: шапка сверху, одна кнопка действия справа внизу, Esc - отмена. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <Binary Id="HeaderBmp" SourceFile="$(var.ResDir)\installer-header.bmp" />
+    <Binary Id="AppIco" SourceFile="$(var.ResDir)\icons\freeturn.ico" />
+
+    <UI Id="FreeTurnUI">
+      <TextStyle Id="FtFont" FaceName="Segoe UI" Size="9" />
+      <TextStyle Id="FtTitle" FaceName="Segoe UI" Size="11" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="FtFont" />
+      <!-- Слова заголовков меняет страница удаления. -->
+      <Property Id="FtProgress" Value="Installing" />
+      <Property Id="FtDone" Value="installed" />
+      <Property Id="FtNoun" Value="Setup" />
+      <Property Id="LAUNCHAPP" Value="1" />
+
+      <Dialog Id="InstallPage" Width="400" Height="300" Title="Setup [ProductName] [DisplayVersion]" NoMinimize="yes">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\FtTitle}Ready to install [ProductName]." />
+        <Control Id="Text" Type="Text" X="15" Y="60" Width="370" Height="24" NoPrefix="yes"
+                 Text="[ProductName] will be installed in [INSTALLFOLDER]" />
+        <Control Id="Install" Type="PushButton" X="135" Y="130" Width="130" Height="40" Default="yes" ElevationShield="yes"
+                 Text="{\FtTitle}&amp;Install Now">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="400" Height="45" Text="HeaderBmp" Disabled="yes" Cancel="yes">
+          <Publish Event="SpawnDialog" Value="CancelDialog" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="MaintenancePage" Width="400" Height="300" Title="Setup [ProductName] [DisplayVersion]" NoMinimize="yes">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\FtTitle}[ProductName] is already installed." />
+        <Control Id="Text" Type="Text" X="15" Y="60" Width="370" Height="24" NoPrefix="yes"
+                 Text="To remove [ProductName] from this computer, click Remove." />
+        <Control Id="Remove" Type="PushButton" X="135" Y="130" Width="130" Height="40" Default="yes" ElevationShield="yes"
+                 Text="{\FtTitle}&amp;Remove">
+          <Publish Property="FtProgress" Value="Removing" />
+          <Publish Property="FtDone" Value="removed" />
+          <Publish Property="FtNoun" Value="Removal" />
+          <Publish Event="Remove" Value="All" />
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="400" Height="45" Text="HeaderBmp" Disabled="yes" Cancel="yes">
+          <Publish Event="SpawnDialog" Value="CancelDialog" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="ProgressPage" Width="400" Height="300" Title="Setup [ProductName] [DisplayVersion]" NoMinimize="yes" Modeless="yes">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 TabSkip="no" Text="{\FtTitle}[FtProgress] [ProductName]..." />
+        <Control Id="ProgressBar" Type="ProgressBar" X="30" Y="155" Width="340" Height="15" ProgressBlocks="yes" Text="Progress">
+          <Subscribe Event="SetProgress" Attribute="Progress" />
+        </Control>
+        <Control Id="ActionText" Type="Text" X="30" Y="175" Width="340" Height="15" NoPrefix="yes">
+          <Subscribe Event="ActionText" Attribute="Text" />
+        </Control>
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="400" Height="45" Text="HeaderBmp" Disabled="yes" Default="yes" Cancel="yes">
+          <Publish Event="SpawnDialog" Value="CancelDialog" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="ExitPage" Width="400" Height="300" Title="Setup [ProductName] [DisplayVersion]" NoMinimize="yes">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\FtTitle}[ProductName] [FtDone]." />
+        <Control Id="Launch" Type="CheckBox" X="15" Y="60" Width="300" Height="15" Property="LAUNCHAPP" CheckBoxValue="1"
+                 Text="&amp;Launch [ProductName]" HideCondition="Installed" />
+        <Control Id="Close" Type="PushButton" X="325" Y="265" Width="60" Height="20" Default="yes" Cancel="yes" Text="&amp;Close">
+          <Publish Event="DoAction" Value="LaunchFreeTurn" Condition="LAUNCHAPP = 1 AND NOT Installed" />
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="400" Height="45" Text="HeaderBmp" Disabled="yes" />
+      </Dialog>
+
+      <Dialog Id="UserExitPage" Width="400" Height="300" Title="Setup [ProductName] [DisplayVersion]" NoMinimize="yes">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\FtTitle}[FtNoun] was cancelled." />
+        <Control Id="Text" Type="Text" X="15" Y="60" Width="370" Height="24" NoPrefix="yes"
+                 Text="Nothing was changed on your computer." />
+        <Control Id="Close" Type="PushButton" X="325" Y="265" Width="60" Height="20" Default="yes" Cancel="yes" Text="&amp;Close">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="400" Height="45" Text="HeaderBmp" Disabled="yes" />
+      </Dialog>
+
+      <Dialog Id="FatalErrorPage" Width="400" Height="300" Title="Setup [ProductName] [DisplayVersion]" NoMinimize="yes">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\FtTitle}[FtNoun] failed." />
+        <Control Id="Text" Type="Text" X="15" Y="60" Width="370" Height="36" NoPrefix="yes"
+                 Text="Setup stopped because of an error, nothing was changed on your computer. Try again or report the problem at [ARPURLINFOABOUT]." />
+        <Control Id="Close" Type="PushButton" X="325" Y="265" Width="60" Height="20" Default="yes" Cancel="yes" Text="&amp;Close">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="400" Height="45" Text="HeaderBmp" Disabled="yes" />
+      </Dialog>
+
+      <!-- FreeTurn.exe держит свой файл: при обновлении установщик предлагает закрыть его сам. -->
+      <Dialog Id="MsiRMFilesInUse" Width="400" Height="300" Title="Setup [ProductName] [DisplayVersion]" NoMinimize="yes">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\FtTitle}Programs need to be closed." />
+        <Control Id="Text" Type="Text" X="15" Y="60" Width="370" Height="24" NoPrefix="yes"
+                 Text="These programs use files that setup has to update. Click Continue to close them." />
+        <Control Id="List" Type="ListBox" X="15" Y="90" Width="370" Height="150" Property="FileInUseProcess" Sunken="yes" TabSkip="yes" />
+        <Control Id="Continue" Type="PushButton" X="260" Y="265" Width="60" Height="20" Default="yes" Text="&amp;Continue">
+          <Publish Event="RMShutdownAndRestart" Value="0" />
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="325" Y="265" Width="60" Height="20" Cancel="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="400" Height="45" Text="HeaderBmp" Disabled="yes" />
+      </Dialog>
+
+      <Dialog Id="CancelDialog" Width="260" Height="84" Title="Setup [ProductName] [DisplayVersion]" NoMinimize="yes">
+        <Control Id="Icon" Type="Icon" X="15" Y="15" Width="24" Height="24" Text="AppIco" Disabled="yes" />
+        <Control Id="Text" Type="Text" X="48" Y="15" Width="197" Height="24" NoPrefix="yes"
+                 Text="Are you sure you want to cancel [ProductName] setup?" />
+        <Control Id="Yes" Type="PushButton" X="67" Y="49" Width="60" Height="20" Text="&amp;Yes">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+        <Control Id="No" Type="PushButton" X="132" Y="49" Width="60" Height="20" Default="yes" Cancel="yes" Text="&amp;No">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="ErrorDialog" Width="270" Height="105" Title="Setup [ProductName] [DisplayVersion]" ErrorDialog="yes" NoMinimize="yes">
+        <Control Id="ErrorIcon" Type="Icon" X="15" Y="15" Width="24" Height="24" Text="AppIco" Disabled="yes" />
+        <Control Id="ErrorText" Type="Text" X="48" Y="15" Width="205" Height="60" NoPrefix="yes" Text="Information text" />
+        <Control Id="A" Type="PushButton" X="100" Y="80" Width="56" Height="17" Text="&amp;Abort">
+          <Publish Event="EndDialog" Value="ErrorAbort" />
+        </Control>
+        <Control Id="C" Type="PushButton" X="100" Y="80" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="ErrorCancel" />
+        </Control>
+        <Control Id="I" Type="PushButton" X="100" Y="80" Width="56" Height="17" Text="&amp;Ignore">
+          <Publish Event="EndDialog" Value="ErrorIgnore" />
+        </Control>
+        <Control Id="N" Type="PushButton" X="100" Y="80" Width="56" Height="17" Text="&amp;No">
+          <Publish Event="EndDialog" Value="ErrorNo" />
+        </Control>
+        <Control Id="O" Type="PushButton" X="100" Y="80" Width="56" Height="17" Text="OK">
+          <Publish Event="EndDialog" Value="ErrorOk" />
+        </Control>
+        <Control Id="R" Type="PushButton" X="100" Y="80" Width="56" Height="17" Text="&amp;Retry">
+          <Publish Event="EndDialog" Value="ErrorRetry" />
+        </Control>
+        <Control Id="Y" Type="PushButton" X="100" Y="80" Width="56" Height="17" Text="&amp;Yes">
+          <Publish Event="EndDialog" Value="ErrorYes" />
+        </Control>
+      </Dialog>
+
+      <ProgressText Action="InstallValidate" Message="Validating install" />
+      <ProgressText Action="StopServices" Template="Service: [1]" Message="Stopping services" />
+      <ProgressText Action="DeleteServices" Template="Service: [1]" Message="Removing services" />
+      <ProgressText Action="RemoveFiles" Template="File: [1]" Message="Removing files" />
+      <ProgressText Action="InstallFiles" Template="File: [1]" Message="Copying files" />
+      <ProgressText Action="CreateShortcuts" Template="Shortcut: [1]" Message="Creating shortcuts" />
+      <ProgressText Action="RemoveShortcuts" Template="Shortcut: [1]" Message="Removing shortcuts" />
+      <ProgressText Action="InstallServices" Template="Service: [2]" Message="Installing services" />
+      <ProgressText Action="StartServices" Template="Service: [1]" Message="Starting services" />
+
+      <InstallUISequence>
+        <Show Dialog="FatalErrorPage" OnExit="error" />
+        <Show Dialog="UserExitPage" OnExit="cancel" />
+        <Show Dialog="ExitPage" OnExit="success" />
+        <Show Dialog="InstallPage" After="CostFinalize" Condition="NOT Installed" />
+        <Show Dialog="MaintenancePage" After="InstallPage" Condition="Installed AND NOT RESUME AND NOT Preselected" />
+        <Show Dialog="ProgressPage" Before="ExecuteAction" />
+      </InstallUISequence>
+    </UI>
+  </Fragment>
+</Wix>

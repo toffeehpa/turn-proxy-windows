@@ -6,7 +6,7 @@
 
 ## Установщик
 
-MSI собирается [WiX Toolset](https://github.com/wixtoolset/wix) v5 (MS-RL). В установщик встроена custom action из `WixToolset.Util.wixext` для `util:CloseApplication` - она закрывает FreeTurn при обновлении.
+MSI собирается [WiX Toolset](https://github.com/wixtoolset/wix) v5 (MS-RL). В установщик встроены custom actions из `WixToolset.Util.wixext`: `util:CloseApplication` закрывает FreeTurn при обновлении, `WixShellExec` запускает его с последнего окна, `WixQuietExec` при удалении стирает автозапуск из HKCU. Окна установщика свои, по раскладке установщика OpenVPN; его код не заимствован.
 
 ## Ядро
 
