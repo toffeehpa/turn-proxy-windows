@@ -45,7 +45,7 @@ wix extension add -g WixToolset.Util.wixext/5.0.2
 wix build installer/FreeTurn.wxs -arch x64 -ext WixToolset.Util.wixext -d Version=0.1.0 -d BinDir=dist/bin -d ResDir=res -o freeturn.msi
 ```
 
-В `BinDir` должны лежать `FreeTurn.exe`, `freeturn-service.exe`, `freeturn-core.exe`, `LICENSE`, `LICENSE-freeturn-core.txt`, `THIRD_PARTY_NOTICES.md`. MSI понимает только `x.y.z`, поэтому beta одной версии ставятся поверх друг друга (`AllowSameVersionUpgrades`).
+В `BinDir` должны лежать `FreeTurn.exe`, `freeturn-service.exe`, `freeturn-core.exe`, `wintun.dll`, `LICENSE`, `LICENSE-freeturn-core.txt`, `LICENSE-wintun.txt`, `THIRD_PARTY_NOTICES.md` (копия `docs/third-party-notices.md`). MSI понимает только `x.y.z`, поэтому beta одной версии ставятся поверх друг друга (`AllowSameVersionUpgrades`).
 
 ## Формат
 

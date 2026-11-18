@@ -20,4 +20,4 @@ FreeTurn не собирает телеметрию, статистику и о�
 
 ## Удаление
 
-Удалите FreeTurn через "Приложения и возможности", затем папки `%LOCALAPPDATA%\FreeTurn` и `%ProgramData%\FreeTurn`. Настройки FreeTurn в реестре не хранит.
+Удалите FreeTurn через "Приложения и возможности", затем папки `%LOCALAPPDATA%\FreeTurn` и `%ProgramData%\FreeTurn`. В реестре FreeTurn хранит только автозапуск, если он включён: значение `FreeTurn` в `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. При удалении установщик его стирает.

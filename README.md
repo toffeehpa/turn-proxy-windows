@@ -52,12 +52,12 @@
 
 ## Документы
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) - устройство приложения
-- [BUILDING.md](BUILDING.md) - сборка и тесты
-- [SECURITY.md](SECURITY.md) - модель безопасности и сообщения об уязвимостях
-- [PRIVACY.md](PRIVACY.md) - какие данные и где хранятся
-- [CODE_SIGNING.md](CODE_SIGNING.md) - подпись сборок
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) - сторонние компоненты
+- [docs/architecture.md](docs/architecture.md) - устройство приложения
+- [docs/building.md](docs/building.md) - сборка и тесты
+- [docs/security.md](docs/security.md) - модель безопасности и сообщения об уязвимостях
+- [docs/privacy.md](docs/privacy.md) - какие данные и где хранятся
+- [docs/code-signing.md](docs/code-signing.md) - подпись сборок
+- [docs/third-party-notices.md](docs/third-party-notices.md) - сторонние компоненты
 
 ## Благодарности
 

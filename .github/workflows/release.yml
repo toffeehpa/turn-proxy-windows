@@ -23,7 +23,8 @@ jobs:
         run: |
           $out = 'dist/bin'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Copy-Item build/Release/FreeTurn.exe, build/Release/freeturn-service.exe, LICENSE, THIRD_PARTY_NOTICES.md $out
+          Copy-Item build/Release/FreeTurn.exe, build/Release/freeturn-service.exe, LICENSE $out
+          Copy-Item docs/third-party-notices.md (Join-Path $out 'THIRD_PARTY_NOTICES.md')
           ./tools/fetch-core.ps1 -OutDir $out -Arch amd64
           ./tools/fetch-wintun.ps1 -OutDir $out -Arch amd64
       # Версия - из тега: release-please ставит её и в CMakeLists, и в тег.
